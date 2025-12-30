@@ -96,6 +96,90 @@ where loan_status in ('Charged Off');
 select sum(total_payment) as bad_loan_received_amount from bank_loan_data
 where loan_status = 'Charged Off' ;
 
+--9 Adding recovery rate from good loans
+with recovery_rate_chargedoff(total_amount_received,total_amount_funded) as (select 
+                              sum(total_payment) as total_amount_received,sum(loan_amount) as total_amount_funded
+                              from bank_loan_data
+                              where loan_status in ('Fully Paid','Current'))
+select 
+      (total_amount_received * 1.0 / total_amount_funded) * 100 AS recovery_percentage,
+      case 
+         when (total_amount_received * 1.0/total_amount_funded)*100 >= 100 then 'in profits' 
+         else 'In Losses'
+         end as profit_loss,
+         case 
+          when (total_amount_received * 1.0/total_amount_funded)*100 <= 100 then -(100 - (total_amount_received * 1.0/total_amount_funded)*100)
+          else +((total_amount_received * 1.0/total_amount_funded)*100) - 100
+          end as difference_per
+from recovery_rate_chargedoff;
+
+--10. Adding recover rate from bad loans
+with recovery_rate_chargedoff(total_amount_received,total_amount_funded) as (select 
+                              sum(total_payment) as total_amount_received,sum(loan_amount) as total_amount_funded
+                              from bank_loan_data
+                              where loan_status in ('Charged Off'))
+select 
+      (total_amount_received * 1.0 / total_amount_funded) * 100 AS recovery_percentage,
+      case 
+         when (total_amount_received * 1.0/total_amount_funded)*100 >= 100 then 'in profits'
+         when (total_amount_received * 1.0/total_amount_funded)*100 >= 100 then 'in p'
+         else 'In Losses'
+         end as profit_loss,
+
+      case 
+          when (total_amount_received * 1.0/total_amount_funded)*100 <= 100 then -(100 - (total_amount_received * 1.0/total_amount_funded)*100)
+          else +(100 - (total_amount_received * 1.0/total_amount_funded)*100)
+          end as difference_per
+from recovery_rate_chargedoff;
+
+-- 11 Bad Loan percentage by state
+with recovery_rate_badloan(address_state,total_received,total_funded) as (select
+        address_state,
+        sum(total_payment) as total_received,
+        sum(loan_amount) as total_funded
+    from bank_loan_data
+    where loan_status = 'Charged Off'
+    group by address_state)
+select address_state,total_received,total_funded,
+       (total_received *1.0/total_funded) *100 as states_per
+from recovery_rate_badloan;
+
+-- Good Loan Percentage by state
+with recovery_rate_goodloan(address_state,total_received,total_funded) as (select
+        address_state,
+        sum(total_payment) as total_received,
+        sum(loan_amount) as total_funded
+    from bank_loan_data
+    where loan_status = 'Current' or loan_status = 'Fully Paid'
+    group by address_state)
+select address_state,total_received,total_funded,
+       (total_received *1.0/total_funded) *100 as states_per
+from recovery_rate_goodloan;
+
+-- Good loan percentage by term
+with recovery_rate_goodloan(term,total_received,total_funded) as (select
+        term,
+        sum(total_payment) as total_received,
+        sum(loan_amount) as total_funded
+    from bank_loan_data
+    where loan_status = 'Fully Paid' or loan_status = 'Current'
+    group by term)
+select term,total_received,total_funded,
+       (total_received *1.0/total_funded) *100 as term_per
+from recovery_rate_goodloan;
+
+-- bad loan percentage by term
+with recovery_rate_badloan(term,total_received,total_funded) as (select
+        term,
+        sum(total_payment) as total_received,
+        sum(loan_amount) as total_funded
+    from bank_loan_data
+    where loan_status = 'Charged Off'
+    group by term)
+select term,total_received,total_funded,
+       (total_received *1.0/total_funded) *100 as term_per
+from recovery_rate_badloan;
+
 
 -- Loan Status Grid View
 select 
@@ -180,3 +264,89 @@ select
  from bank_loan_data
  group by home_ownership
  order by count(id);
+
+
+--Monthly Loan Applications + MoM Growth percentage
+with monthly_apps as (
+    select
+        year(issue_date) as yr,
+        month(issue_date) as mn,
+        count(id) as total_applications
+    from bank_loan_data
+    group by year(issue_date), month(issue_date)
+)
+select
+    yr,
+    mn,
+    total_applications,
+    lag(total_applications) over(order by yr, mn) as prev_month_apps,
+    round(
+        (total_applications - lag(total_applications) over (order by yr, mn)) * 100.0
+        / nullif(lag(total_applications) over (order by yr, mn), 0),
+        2
+    ) as MoM_growth_percent
+from monthly_apps
+order by yr, mn;
+
+--Monthly Funded Amount + MoM Growth percentage
+with monthly_funding as (
+    select
+        year(issue_date) as yr,
+        month(issue_date) as mn,
+        sum(loan_amount) as total_funded_amount
+    from bank_loan_data
+    group by year(issue_date), month(issue_date)
+)
+select
+    yr,
+    mn,
+    total_funded_amount,
+    lag(total_funded_amount) over (order by yr, mn) as prev_month_funded,
+    round(
+        (total_funded_amount - lag(total_funded_amount) over (order by yr, mn)) * 100.0
+        / nullif(lag(total_funded_amount) over (order by yr, mn), 0),
+        2
+    ) as mom_growth_percent
+from monthly_funding
+order by yr, mn;
+
+--ranking by states for good loan
+with recovery_rate_goodloan as (
+    select
+        address_state,
+        sum(total_payment) as total_received,
+        sum(loan_amount) as total_funded
+    from bank_loan_data
+    where loan_status in ('Current', 'Fully Paid')
+    group by address_state
+)
+select
+    address_state,
+    total_received,
+    total_funded,
+    round((total_received * 1.0 / total_funded) * 100, 2) as good_recovery_percent,
+    rank() over (
+        order by (total_received * 1.0 / total_funded) desc
+    ) as state_rank
+from recovery_rate_goodloan
+order by state_rank;
+
+-- ranking by all states
+with recovery_rate as (
+    select
+        address_state,
+        sum(total_payment) as total_received,
+        sum(loan_amount) as total_funded
+    from bank_loan_data
+    where loan_status in ('Current', 'Fully Paid','Charged Off')
+    group by address_state
+)
+select
+    address_state,
+    total_received,
+    total_funded,
+    round((total_received * 1.0 / total_funded) * 100, 2) as good_recovery_percent,
+    rank() over (
+        order by (total_received * 1.0 / total_funded) desc
+    ) as state_rank
+from recovery_rate
