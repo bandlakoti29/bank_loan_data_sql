@@ -349,4 +349,4 @@ select
     rank() over (
         order by (total_received * 1.0 / total_funded) desc
     ) as state_rank
-from recovery_rate
+from recovery_rate;
